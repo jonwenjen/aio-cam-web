@@ -18,18 +18,7 @@
   const bytesOf = async file => new Uint8Array(await file.arrayBuffer());
   const orientationOf = u => { const j = analyze(u); return getTag(parseTiff(u.subarray(j.exif.dataStart + 6, j.exif.end)), 'ifd0', TAG.Orientation); };
 
-  // e2e=1：只匯出一次（?file=&privacy=&look=），給 test/e2e/export.test.mjs 取檔驗證
-  const q = new URLSearchParams(location.search);
-  if (q.has('e2e')) {
-    run(async () => {
-      const path = q.get('file');
-      const file = new File([await (await fetch(path)).arrayBuffer()], path.split('/').pop(), { type: 'image/jpeg' });
-      const look = q.get('look') ?? 'asshot';
-      const r = await exportImage(await importFile(file), BUILTIN[look].recipe, { privacy: q.get('privacy') ?? 'keep', lookId: look });
-      await deliver(r.file);
-      return { hdr: r.hdr, notice: r.notice, timings: r.timings };
-    });
-  } else run(async () => {
+  run(async () => {
     const d = { failures: [] };
     const check = (cond, msg) => { if (!cond) d.failures.push(msg); };
 

@@ -1,0 +1,142 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ui</title>
+<style>body { margin: 0 } iframe { width: 440px; height: 956px; border: 0 }</style>
+<iframe id="app"></iframe>
+<script type="module">
+  // Task 15：以 iframe 操作真的介面（/?test=1）
+  import { run } from './harness.js';
+
+  const frame = document.getElementById('app');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const win = () => frame.contentWindow;
+  const doc = () => frame.contentDocument;
+  const $ = sel => doc().querySelector(sel);
+  const $$ = sel => [...doc().querySelectorAll(sel)];
+  const state = () => win().__aio.state;
+  const clone = x => JSON.parse(JSON.stringify(x));
+
+  async function waitFor(what, fn, ms = 20000) {
+    const t0 = performance.now();
+    while (performance.now() - t0 < ms) {
+      try { if (fn()) return; } catch { /* 還沒好 */ }
+      await sleep(50);
+    }
+    throw new Error('timeout waiting for ' + what);
+  }
+  async function load() {
+    frame.src = '/?test=1&v=' + Math.random();
+    await new Promise(r => frame.addEventListener('load', r, { once: true }));
+    await waitFor('app ready', () => win().__aio?.ready);
+    win().addEventListener('error', e => errors.push(String(e.message)));
+    win().addEventListener('unhandledrejection', e => errors.push(String(e.reason?.stack ?? e.reason)));
+  }
+  /** 等下一次預覽更新完成 */
+  async function rendered(action) {
+    const before = state().renderCount;
+    await action();
+    await waitFor('preview render', () => state().renderCount > before && !state().rendering);
+  }
+  async function importFixture(name) {
+    const bytes = await (await fetch('../fixtures/' + name)).arrayBuffer();
+    const W = win();
+    const dt = new W.DataTransfer();
+    dt.items.add(new W.File([bytes], name, { type: 'image/jpeg' }));
+    const input = $('#file-input');
+    const n = state().importCount;
+    input.files = dt.files;
+    input.dispatchEvent(new W.Event('change', { bubbles: true }));
+    await waitFor('import', () => state().importCount > n && state().previewReady && !state().rendering && state().recommendations?.length === 3);
+  }
+  const accessibleName = el => (el.getAttribute('aria-label') || el.textContent || (el.labels?.[0]?.textContent ?? '')).trim();
+  const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden'; };
+  const errors = [];
+
+  run(async () => {
+    const d = { failures: [] };
+    const check = (cond, msg) => { if (!cond) d.failures.push(msg); };
+    win()?.localStorage?.clear?.();
+    await load();
+    win().localStorage.clear();
+    await load();
+
+    check($('#save-btn').disabled === true, 'save disabled before import');
+    await importFixture('gm_gps_rot6.jpg');
+    check($('#save-btn').disabled === false, 'save enabled after import');
+    const pr = $('#preview').getBoundingClientRect();
+    check(pr.width > 0 && pr.height > 0, 'preview has size');
+    check(visible($('#hdr-badge')), 'HDR badge visible');
+
+    // 推薦列
+    const cards = $$('#recommend .rec-card');
+    const recLooks = cards.map(c => c.dataset.look);
+    d.recommend = cards.map(c => `${c.dataset.look}: ${c.querySelector('.rec-reason').textContent}`);
+    check(cards.length === 3 && new Set(recLooks).size === 3, 'three distinct recommendations');
+    check(cards.every(c => c.querySelector('.rec-reason').textContent.trim()), 'every recommendation has a reason');
+
+    // 發色來回
+    const h0 = state().lastPreviewHash;
+    const base0 = state().recipe.base;
+    await rendered(() => $(`#looks [data-look="${base0 === 'hiyori' ? 'asshot' : 'hiyori'}"]`).click());
+    await rendered(() => $(`#looks [data-look="hiyori"]`).click());
+    const hHiyori = state().lastPreviewHash;
+    await rendered(() => $('#looks [data-look="asshot"]').click());
+    const hAsshot = state().lastPreviewHash;
+    check(hHiyori !== hAsshot, 'hiyori preview differs from asshot');
+    await rendered(() => $('#looks [data-look="hiyori"]').click());
+    check(state().lastPreviewHash === hHiyori, 'hiyori round-trip hash');
+    await rendered(() => $('#looks [data-look="asshot"]').click());
+    check(state().lastPreviewHash === hAsshot, 'asshot round-trip hash');
+    check($('#looks [data-look="asshot"]').getAttribute('aria-pressed') === 'true', 'selected look aria-pressed');
+    void h0;
+
+    // 自動來回
+    const before = clone(state().recipe), hBefore = state().lastPreviewHash;
+    await rendered(() => $('#auto-btn').click());
+    d.autoRecipe = { base: state().recipe.base, auto: state().recipe.auto };
+    check(state().recipe.auto !== null, 'auto applied');
+    check(state().recipe.base === state().recommendations[0].lookId, 'auto picks recommendation #1');
+    check($('#auto-btn').getAttribute('aria-pressed') === 'true', 'auto aria-pressed');
+    const hAuto = state().lastPreviewHash;
+    check(hAuto !== hBefore || before.base === state().recipe.base, 'auto changes preview');
+    await rendered(() => $('#auto-btn').click());
+    check(JSON.stringify(state().recipe) === JSON.stringify(before), 'undo auto restores the full recipe');
+    check(state().lastPreviewHash === hBefore, 'undo auto restores preview hash');
+
+    // 匯入時自動套用（預設關閉）
+    check($('#auto-on-import').checked === false, 'autoOnImport default off');
+    $('#auto-on-import').click();
+    await importFixture('gm_gps_rot6.jpg');
+    check(state().recipe.auto !== null, 'autoOnImport on → auto applied on import');
+    $('#auto-on-import').click();
+    await importFixture('gm_gps_rot6.jpg');
+    check(state().recipe.auto === null, 'autoOnImport off → no auto');
+
+    // 存檔：日和、去除位置
+    await rendered(() => $('#looks [data-look="hiyori"]').click());
+    $('#privacy [data-privacy="noLocation"]').click();
+    const n = win().__aio.outputs.length;
+    $('#save-btn').click();
+    await waitFor('saved', () => win().__aio.outputs.length === n + 1 && !state().busy, 60000);
+    const out = win().__aio.outputs.at(-1);
+    d.saved = { name: out.name, bytes: out.bytes.length, lastExport: state().lastExport };
+    check(/^AIO_\d{8}_\d{6}_hiyori\.jpg$/.test(out.name), 'file name ' + out.name);
+    await load();
+    check($('#privacy [data-privacy="noLocation"]').getAttribute('aria-pressed') === 'true', 'privacy remembered after reload');
+
+    // 無障礙：可及名稱、觸控高度
+    await importFixture('gm_gps_rot6.jpg');
+    const controls = $$('button, input, select, [role=button]').filter(visible);
+    const unnamed = controls.filter(el => !accessibleName(el)).map(el => el.outerHTML.slice(0, 80));
+    check(unnamed.length === 0, 'unnamed controls: ' + unnamed.join(' | '));
+    const small = controls.filter(el => el.getBoundingClientRect().height < 44).map(el => `${el.id || el.className || el.tagName} ${el.getBoundingClientRect().height.toFixed(0)}`);
+    check(small.length === 0, 'controls under 44px: ' + small.join(', '));
+    const primary = ['#auto-btn', '#import-btn', '#save-btn'].filter(s => $(s).getBoundingClientRect().height < 56);
+    check(primary.length === 0, 'primary buttons under 56px: ' + primary.join(', '));
+    d.controls = controls.length;
+
+    check(errors.length === 0, 'errors in app: ' + errors.join(' | '));
+    d.pass = d.failures.length === 0;
+    return d;
+  });
+</script>

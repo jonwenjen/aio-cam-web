@@ -4,13 +4,13 @@ import { wbGains, buildLut } from '../looks/lut.js';
 const FORMAT_SCALE = { half: 1.4, '35mm': 1.0, '120': 0.6 };
 
 /** @returns {RenderParams}（見計畫「共用介面」） */
-export function toRenderParams(recipe, { shortSide }) {
+export function toRenderParams(recipe, { shortSide, lut }) {
   const a = recipe.auto;
   const g = recipe.grain;
   return {
     exposureEV: recipe.tone.exposure + (a?.exposure ?? 0),
     wbGains: wbGains(recipe.wb.temp + (a?.temp ?? 0), recipe.wb.tint + (a?.tint ?? 0)),
-    lut: buildLut(recipe),
+    lut: lut ?? buildLut(recipe),
     grain: {
       amount: g.amount,
       cellPx: Math.max(0.75, 1.5 * g.size * FORMAT_SCALE[g.format] * shortSide / 3024),
@@ -20,6 +20,14 @@ export function toRenderParams(recipe, { shortSide }) {
     },
     vignette: { amount: recipe.vignette.amount },
   };
+}
+
+/** 影響 LUT 的欄位（曝光、白平衡、顆粒、暗角不在 LUT 裡）；預覽用來快取 LUT */
+export function lutKey(recipe) {
+  const { exposure, ...tone } = recipe.tone;
+  const a = recipe.auto;
+  return JSON.stringify([recipe.intensity, tone, recipe.color.saturation, recipe.color.vibrance, recipe.hsl, recipe.grade,
+    a && [a.highlights, a.shadows, a.whites, a.blacks, a.vibrance]]);
 }
 
 /** 存檔座標 (sx,sy) → 轉正座標 (ux,uy)。Ws×Hs 是存檔尺寸。 */

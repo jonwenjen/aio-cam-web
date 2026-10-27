@@ -19,21 +19,41 @@ let server;
 before(async () => { server = await startServer(); mkdirSync(OUT, { recursive: true }); });
 after(async () => { await server?.close(); });
 
-/** 在同一個瀏覽器裡依序匯出；回傳 [{ file, privacy, look, name, notice, hdr, path }] */
+/** 走真的介面（/?test=1）：選檔 → 點發色 → 點隱私 → 存檔；回傳 [{ file, privacy, look, name, notice, hdr, path }] */
 async function exportAll(jobs) {
   return withPage(async ({ send, evaluate, errors }) => {
     const results = [];
     for (const job of jobs) {
-      const q = new URLSearchParams({ test: '1', e2e: '1', file: '/' + job.file, privacy: job.privacy, look: job.look });
-      await send('Page.navigate', { url: `${server.url}test/browser/io.html?${q}` });
-      let r = null;
-      for (let i = 0; i < 480 && !r; i++) { await sleep(250); r = await evaluate('window.__result ?? null').catch(() => null); }
-      assert.ok(r, `timeout exporting ${job.file} ${job.privacy}`);
-      assert.ok(r.pass, JSON.stringify(r.details));
-      const out = await evaluate(`(() => { const o = window.__aio.outputs.at(-1); let s = ''; for (let i = 0; i < o.bytes.length; i += 32768) s += String.fromCharCode(...o.bytes.subarray(i, i + 32768)); return { name: o.name, b64: btoa(s) }; })()`);
+      await send('Page.navigate', { url: `${server.url}?test=1` });
+      let ready = false;
+      for (let i = 0; i < 200 && !ready; i++) { await sleep(100); ready = await evaluate('!!window.__aio?.ready').catch(() => false); }
+      assert.ok(ready, 'app not ready');
+      const r = await evaluate(`(async () => {
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const until = async (fn, ms = 120000) => { const t0 = Date.now(); while (!fn()) { if (Date.now() - t0 > ms) throw new Error('timeout'); await sleep(50); } };
+        const s = window.__aio.state;
+        const bytes = await (await fetch(${JSON.stringify('/' + job.file)})).arrayBuffer();
+        const dt = new DataTransfer();
+        dt.items.add(new File([bytes], ${JSON.stringify(job.file.split('/').pop())}, { type: 'image/jpeg' }));
+        const input = document.querySelector('#file-input');
+        const n0 = s.importCount;
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        await until(() => s.importCount > n0 && s.previewReady && !s.rendering);
+        document.querySelector('#looks [data-look=${JSON.stringify(job.look)}]').click();
+        document.querySelector('#privacy [data-privacy=${JSON.stringify(job.privacy)}]').click();
+        await until(() => !s.rendering);
+        const n = window.__aio.outputs.length;
+        document.querySelector('#save-btn').click();
+        await until(() => window.__aio.outputs.length === n + 1 && !s.busy);
+        const o = window.__aio.outputs.at(-1);
+        let b64 = '';
+        for (let i = 0; i < o.bytes.length; i += 32768) b64 += String.fromCharCode(...o.bytes.subarray(i, i + 32768));
+        return { name: o.name, b64: btoa(b64), ...s.lastExport };
+      })()`);
       const path = `${OUT}${job.file.split('/').pop().replace(/\.\w+$/, '')}-${job.look}-${job.privacy}.jpg`;
-      writeFileSync(path, Buffer.from(out.b64, 'base64'));
-      results.push({ ...job, ...r.details, name: out.name, path });
+      writeFileSync(path, Buffer.from(r.b64, 'base64'));
+      results.push({ ...job, hdr: r.hdr, notice: r.notice, name: r.name, path });
     }
     assert.deepEqual(errors, []);
     return results;
