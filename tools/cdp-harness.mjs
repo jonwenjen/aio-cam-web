@@ -147,6 +147,11 @@ export async function withPage(fn, opts = {}) {
 
     await send('Runtime.enable');
     await send('Page.enable');
+    // 例如把 navigator.gpu 設成 undefined 來模擬沒有 WebGPU（Chrome 旗標關不掉）
+    for (const source of opts.initScripts ?? []) {
+      await send('Page.addScriptToEvaluateOnNewDocument', { source });
+    }
+    if (opts.beforeNavigate) await opts.beforeNavigate(send);
     if (url !== 'about:blank') {
       await send('Page.navigate', { url });
       await sleep(settleMs);
