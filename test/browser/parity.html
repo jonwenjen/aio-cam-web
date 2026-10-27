@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>parity</title>
+<script type="module">
+  // S6：WebGPU、WebGL2 對 CPU 參考，ΔE2000 mean ≤ 0.5、max ≤ 2.0（10 張圖 × 全部發色）
+  // S7：沒有 WebGPU 時 getEngine() 選 WebGL2，完整流程無錯誤
+  import { run, loadImageData, toImageData, rotate90 } from './harness.js';
+  import { makeSynthetic, SYNTHETIC_NAMES } from './synthetic.js';
+  import { deltaEStats } from './deltae.js';
+  import { CpuEngine } from '../../js/engine/cpu-ref.js';
+  import { createWebGPUEngine } from '../../js/engine/webgpu.js';
+  import { createWebGL2Engine } from '../../js/engine/webgl2.js';
+  import { getEngine } from '../../js/engine/engine.js';
+  import { getDeviceProfile } from '../../js/device.js';
+  import { toRenderParams } from '../../js/engine/params.js';
+  import { BUILTIN, ORDER } from '../../js/looks/builtin.js';
+
+  run(async () => {
+    const details = { images: [], results: {}, failures: [] };
+    const images = [];
+    for (const n of ['05', '15', '20', '23']) images.push([`kodim${n}`, await loadImageData(`../fixtures/kodak/kodim${n}.png`)]);
+    images.push(['apple_gainmap_new', await loadImageData('../fixtures/apple_gainmap_new.jpg')]);
+    for (const name of SYNTHETIC_NAMES) images.push([name, toImageData(makeSynthetic(name))]);
+    const priv = await fetch('../private/IMG_0040.jpg', { method: 'HEAD' });
+    if (priv.ok) images.push(['IMG_0040 (private)', await loadImageData('../private/IMG_0040.jpg')]);
+    else { images.push(['hueWheel_rot90 (IMG_0040 missing)', rotate90(makeSynthetic('hueWheel'))]); details.note = 'test/private/IMG_0040.jpg missing; used rotated hueWheel'; }
+    details.images = images.map(([n, img]) => `${n} ${img.width}x${img.height}`);
+
+    const engines = [];
+    const gpu = await createWebGPUEngine();
+    if (gpu) engines.push(gpu);
+    const gl = await createWebGL2Engine();
+    if (gl) engines.push(gl);
+    details.engines = engines.map(e => e.kind);
+    if (!gl) details.failures.push('WebGL2 unavailable');
+
+    const auto = await getEngine();
+    details.selected = auto.kind;
+    if (!navigator.gpu && auto.kind !== 'webgl2') details.failures.push(`S7: getEngine() picked ${auto.kind}`);
+    if (navigator.gpu && auto.kind !== 'webgpu') details.failures.push(`getEngine() picked ${auto.kind} with WebGPU available`);
+    details.device = await getDeviceProfile();
+
+    const cpu = new CpuEngine();
+    const worst = {};
+    for (const [name, src] of images) {
+      const target = { width: src.width, height: src.height, orientation: 1 };
+      for (const id of ORDER) {
+        const params = toRenderParams(BUILTIN[id].recipe, { shortSide: Math.min(src.width, src.height) });
+        const ref = await cpu.render(src, params, target);
+        for (const e of engines) {
+          const s = deltaEStats(await e.render(src, params, target), ref);
+          details.results[`${e.kind}/${id}/${name}`] = { mean: +s.mean.toFixed(4), max: +s.max.toFixed(3), p99: +s.p99.toFixed(3) };
+          const w = worst[`${e.kind}/${id}`] ??= { mean: 0, max: 0 };
+          w.mean = Math.max(w.mean, s.mean); w.max = Math.max(w.max, s.max);
+          if (s.mean > 0.5 || s.max > 2.0) details.failures.push(`${e.kind}/${id}/${name}: mean ${s.mean} max ${s.max}`);
+        }
+      }
+    }
+    details.worstPerLook = worst;
+    engines.forEach(e => e.dispose());
+    details.pass = details.failures.length === 0;
+    return details;
+  });
+</script>

@@ -40,6 +40,7 @@ class WebGPUEngine {
     this.uniform = device.createBuffer({ size: UNIFORM_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.srcCache = { key: null, texture: null };
     this.lutCache = { key: null, texture: null };
+    this.contexts = new WeakMap();
   }
 
   checkAlive() {
@@ -150,13 +151,15 @@ class WebGPUEngine {
     this.checkAlive();
     if (canvas.width !== src.width) canvas.width = src.width;
     if (canvas.height !== src.height) canvas.height = src.height;
-    if (this.canvas !== canvas) {
-      this.ctx = canvas.getContext('webgpu');
-      this.ctx.configure({ device: this.device, format: 'rgba8unorm', colorSpace: 'display-p3', alphaMode: 'opaque' });
-      this.canvas = canvas;
+    // 預覽與推薦縮圖各有自己的畫布：每個畫布只 configure 一次
+    let ctx = this.contexts.get(canvas);
+    if (!ctx) {
+      ctx = canvas.getContext('webgpu');
+      ctx.configure({ device: this.device, format: 'rgba8unorm', colorSpace: 'display-p3', alphaMode: 'opaque' });
+      this.contexts.set(canvas, ctx);
     }
     const encoder = this.device.createCommandEncoder();
-    this.encodePass(encoder, src, params, { width: src.width, height: src.height, orientation: 1 }, this.ctx.getCurrentTexture().createView());
+    this.encodePass(encoder, src, params, { width: src.width, height: src.height, orientation: 1 }, ctx.getCurrentTexture().createView());
     // 不等 onSubmittedWorkDone：等待會跨過 frame 呈現，同一個 task 內的 drawImage 才讀得到這一幀
     this.device.queue.submit([encoder.finish()]);
   }

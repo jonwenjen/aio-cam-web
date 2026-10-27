@@ -26,10 +26,10 @@ export async function runPage(url, run, { timeoutMs = TIMEOUT_MS } = {}) {
     let result = null;
     while (Date.now() - t0 < timeoutMs) {
       result = await evaluate('window.__result ?? null').catch(() => null);
-      if (result) break;
+      if (result || errors.length) break; // 未捕捉錯誤已經代表失敗，不必等到逾時
       await sleep(250);
     }
-    if (!result) result = { pass: false, details: { error: `timeout after ${timeoutMs / 1000}s` } };
+    if (!result) result = { pass: false, details: { error: errors.length ? 'uncaught error' : `timeout after ${timeoutMs / 1000}s` } };
     const pass = !!result.pass && errors.length === 0;
     return { pass, details: result.details, errors: [...errors], logs: [...logs], ms: Date.now() - t0 };
   }, { url, gpu: true, chromeArgs: GPU_ARGS, initScripts: run.initScripts, settleMs: 500 });
