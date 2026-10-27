@@ -1,0 +1,52 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm ci:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run:*)",
+      "Bash(node:*)",
+      "Bash(npx:*)",
+      "Bash(exiftool:*)",
+      "Bash(swiftc:*)",
+      "Bash(sips:*)",
+      "Bash(shasum:*)",
+      "Bash(curl:*)",
+      "Bash(bash tools/:*)",
+      "Bash(sh tools/:*)",
+      "Bash(tools/:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+      "Bash(git ls-files:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(chmod:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Edit",
+      "Write",
+      "Read",
+      "Glob",
+      "Grep",
+      "WebFetch(domain:r0k.us)",
+      "WebFetch(domain:github.com)"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(gh repo create:*)",
+      "Bash(gh api:*)",
+      "Bash(rm -rf:*)",
+      "Read(test/private/**)"
+    ]
+  }
+}
