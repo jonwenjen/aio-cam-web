@@ -25,7 +25,7 @@
     throw new Error('timeout waiting for ' + what);
   }
   async function load() {
-    frame.src = '/?test=1&v=' + Math.random();
+    frame.src = '../../?test=1&v=' + Math.random(); // 相對路徑：本機根目錄與 GitHub Pages 子路徑都能用
     await new Promise(r => frame.addEventListener('load', r, { once: true }));
     await waitFor('app ready', () => win().__aio?.ready);
     win().addEventListener('error', e => errors.push(String(e.message)));

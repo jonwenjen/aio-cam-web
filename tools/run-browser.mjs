@@ -1,6 +1,6 @@
 // 瀏覽器測試執行器：每頁跑兩次——有 GPU（WebGPU 可用）與「沒有 WebGPU」（S7）。
 // 頁面完成時設定 window.__result = { pass, details }；有任何未捕捉錯誤就算失敗。
-// 用法：node tools/run-browser.mjs [test/browser/page.html ...]
+// 用法：node tools/run-browser.mjs [test/browser/page.html | https://…/page.html ...]
 import { readdir, mkdir, writeFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +48,8 @@ async function main() {
   try {
     for (const page of pages) {
       for (const run of RUNS) {
-        const r = await runPage(server.url + page.replace(/^\.?\//, ''), run);
+        // 完整網址（例如線上網站）直接開；否則相對於本機伺服器
+        const r = await runPage(/^https?:\/\//.test(page) ? page : server.url + page.replace(/^\.?\//, ''), run);
         const name = basename(page.split('?')[0], '.html');
         await writeFile(`${OUT}browser-${name}-${run.name}.json`, JSON.stringify(r, null, 2));
         rows.push({ page, run: run.name, pass: r.pass, ms: r.ms, note: r.errors[0] ?? r.details?.error ?? r.details?.skipped ?? '' });
