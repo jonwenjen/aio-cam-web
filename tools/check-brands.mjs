@@ -10,6 +10,18 @@ const WORDS = ['fuji', 'fujifilm', 'ricoh', 'leica', 'olympus', 'nikon', 'canon'
   'superia', 'acros', 'tri-x', 'hp5', 'polaroid'];
 // gold 以單字邊界比對，避免誤判 golden
 const PATTERN = new RegExp(`(${WORDS.map(w => w.replace(/[-]/g, '\\$&')).join('|')})|\\bgold\\b`, 'i');
+// 子字串比對才抓得到藏在識別字裡的品牌（fujiLook）；含有品牌字串的一般英文單字先拿掉
+const ALLOWED = /portrait|canonical/gi;
+
+/** 回傳 ['行號: 命中字串', ...] */
+export function scanText(text) {
+  const hits = [];
+  text.split('\n').forEach((line, i) => {
+    const m = line.replace(ALLOWED, ' ').match(PATTERN);
+    if (m) hits.push(`${i + 1}: ${m[0]}`);
+  });
+  return hits;
+}
 
 async function* walk(path) {
   let s;
@@ -25,11 +37,7 @@ export async function findBrands(root = ROOT) {
   const hits = [];
   for (const target of TARGETS) {
     for await (const file of walk(join(root, target))) {
-      const lines = (await readFile(file, 'utf8')).split('\n');
-      lines.forEach((line, i) => {
-        const m = line.match(PATTERN);
-        if (m) hits.push(`${relative(root, file)}:${i + 1}: ${m[0]}`);
-      });
+      for (const h of scanText(await readFile(file, 'utf8'))) hits.push(`${relative(root, file)}:${h}`);
     }
   }
   return hits;

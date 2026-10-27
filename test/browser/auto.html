@@ -1,0 +1,90 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>auto</title>
+<script type="module">
+  // S20：好照片不亂改、壞照片救得回、結果確定、計算夠快。以整組測試圖判定，不針對單張。
+  // 判定（spec v0.6 的 S20）：好照片色溫 |Δ| ≤ 200K（每張）、劣化曝光殘差平均 ≤ 0.3 EV、確定性、計算時間。
+  // 好照片 |EV| ≤ 0.2 照實列在 details.goodEvMisses（使用者 2026-10-28 決定：照實回報，不再針對單張調整）；
+  // 劣化色溫殘差只記錄（自動白平衡只輕推 ±200K，±1000K 救回移到 M3 與 S21 一起處理）。
+  // 測試圖：12 張 iPhone 18 實拍（Wikimedia Commons，tools/fetch-fixtures.sh 下載到 test/external/s20/，只放本機）
+  // ＋ test/private/IMG_0040.jpg（存在時）。Kodak 掃描底片本身偏暖、高光到頂，不代表 iPhone 照片，只用在 S6（2026-10-28 使用者決定）。
+  import { run } from './harness.js';
+  import { importFile } from '../../js/io/import.js';
+  import { thumbnailOf, analyzeScene, exifForAnalysis } from '../../js/looks/analyze.js';
+  import { autoAdjust } from '../../js/looks/auto.js';
+  import { recommend } from '../../js/looks/recommend.js';
+  import { decode8, encodeOETF } from '../../js/color/p3.js';
+  import { wbGains } from '../../js/looks/lut.js';
+
+  const to8 = v => Math.round(encodeOETF(Math.min(1, Math.max(0, v))) * 255);
+  /** 劣化在線性 P3 做：解碼 → decode8 → 乘法 → encodeOETF → 8-bit */
+  function degrade(img, dEV, dK) {
+    const g = wbGains(dK, 0).map(v => v * 2 ** dEV);
+    const data = new Uint8ClampedArray(img.data.length);
+    for (let i = 0; i < data.length; i += 4) {
+      for (let c = 0; c < 3; c++) data[i + c] = to8(decode8(img.data[i + c]) * g[c]);
+      data[i + 3] = 255;
+    }
+    return { width: img.width, height: img.height, data };
+  }
+  const DEGRADATIONS = [[-1, 0], [1, 0], [0, 1000], [0, -1000], [-1, 1000], [-1, -1000], [1, 1000], [1, -1000]];
+
+  run(async () => {
+    const d = { good: {}, degraded: [], failures: [] };
+    const sources = await (await fetch('../s20-sources.json')).json();
+    const paths = sources.map(s => `../external/s20/${s.id}.jpg`);
+    if ((await fetch('../private/IMG_0040.jpg', { method: 'HEAD' })).ok) paths.push('../private/IMG_0040.jpg');
+    const inputs = [];
+    for (const path of paths) {
+      const res = await fetch(path);
+      if (!res.ok) return { pass: false, error: `${path} missing — run tools/fetch-fixtures.sh` };
+      const src = await importFile(new File([await res.arrayBuffer()], path.split('/').pop()));
+      inputs.push({ name: path.split('/').pop(), thumb: await thumbnailOf(src), exif: exifForAnalysis(src) });
+    }
+    d.images = inputs.length;
+
+    // 好照片：全部實拍原圖
+    for (const { name, thumb, exif } of inputs) {
+      const a = autoAdjust(analyzeScene(thumb, exif));
+      d.good[name] = a;
+      if (Math.abs(a.exposure) > 0.2) (d.goodEvMisses ??= []).push(`${name}: ${a.exposure}`);
+      if (Math.abs(a.temp) > 200) d.failures.push(`good ${name}: temp ${a.temp}`);
+    }
+
+    // 劣化：每張 × 8 種
+    for (const { name, thumb, exif } of inputs) {
+      const ref = autoAdjust(analyzeScene(thumb, exif));
+      for (const [dEV, dK] of DEGRADATIONS) {
+        const a = autoAdjust(analyzeScene(degrade(thumb, dEV, dK), exif));
+        d.degraded.push({ name, dEV, dK, exposure: a.exposure, temp: a.temp,
+          evResidual: +Math.abs(a.exposure - ref.exposure + dEV).toFixed(3),
+          tempResidual: Math.abs(a.temp - ref.temp + dK) });
+      }
+    }
+    const mean = k => d.degraded.reduce((s, x) => s + x[k], 0) / d.degraded.length;
+    d.meanEvResidual = +mean('evResidual').toFixed(3);
+    d.meanTempResidual = +mean('tempResidual').toFixed(1);
+    d.worst3 = [...d.degraded].sort((a, b) => (b.evResidual / 0.3 + b.tempResidual / 400) - (a.evResidual / 0.3 + a.tempResidual / 400)).slice(0, 3);
+    if (d.meanEvResidual > 0.3) d.failures.push(`mean EV residual ${d.meanEvResidual} > 0.3`);
+    d.tempResidualNote = 'recorded only; WB recovery of ±1000K casts deferred to M3 (spec v0.6)';
+
+    // 確定性
+    const s1 = analyzeScene(inputs[0].thumb, inputs[0].exif), s2 = analyzeScene(inputs[0].thumb, inputs[0].exif);
+    if (JSON.stringify([autoAdjust(s1), recommend(s1)]) !== JSON.stringify([autoAdjust(s2), recommend(s2)])) d.failures.push('not deterministic');
+
+    // 時間：analyze + auto + recommend（桌機 ≤ 15 ms；iPhone 50 ms 在 Task 18 實測）
+    const times = [];
+    for (let r = 0; r < 5; r++) for (const { thumb, exif } of inputs) {
+      const t0 = performance.now();
+      const s = analyzeScene(thumb, exif); autoAdjust(s); recommend(s);
+      times.push(performance.now() - t0);
+    }
+    times.sort((a, b) => a - b);
+    d.msMedian = +times[times.length >> 1].toFixed(2);
+    d.msMax = +times.at(-1).toFixed(2);
+    if (d.msMedian > 15) d.failures.push(`analysis ${d.msMedian} ms > 15`);
+
+    d.pass = d.failures.length === 0;
+    return d;
+  });
+</script>
