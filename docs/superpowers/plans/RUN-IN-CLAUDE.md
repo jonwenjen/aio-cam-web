@@ -5,7 +5,8 @@
 ## 0. 前置（一次性，約 2 分鐘）
 
 ```bash
-cd ~/Projects/aio-cam-web
+cd ~/Projects/aio-cam-web        # 沒有的話：gh repo clone jonwenjen/aio-cam-web ~/Projects/aio-cam-web
+git pull
 git status                      # 應該是乾淨的
 claude                          # 開互動模式
 ```
@@ -20,7 +21,7 @@ claude                          # 開互動模式
 
 專案已附好：
 - `CLAUDE.md`：每次對話自動載入的專案規則（品牌字詞禁用、TDD、檢查點）。
-- `.claude/settings.json`：允許 Claude 不問就跑測試、node、exiftool、swiftc、git commit；**禁止** `git push`、`gh repo create`（要等檢查點 B 你同意才做）。
+- `.claude/settings.json`：允許 Claude 不問就跑測試、node、exiftool、swiftc、git commit；`git push`、`gh api`（開 Pages）每次都會**先問你**；`gh repo create` 與 `rm -rf` 一律禁止。
 
 ## 1. 開始（貼這段給 Claude）
 
@@ -35,7 +36,7 @@ claude                          # 開互動模式
 | 何時 | Claude 會給你 | 你要做的 |
 |---|---|---|
 | 檢查點 A（Task 11 後） | `npm run check` 結果、7 組發色 × 3 種引擎的色差表 | 看數字是否都在門檻內（mean ≤ 0.5、max ≤ 2.0），回「繼續」 |
-| 檢查點 B（Task 16 後） | 完整測試結果、輸出檔驗證表、自動調整 S20 量測表、三張手機尺寸截圖 | 決定是否建立公開 repo 並部署；同意就回「部署」 |
+| 檢查點 B（Task 16 後） | 完整測試結果、輸出檔驗證表、自動調整 S20 量測表、三張手機尺寸截圖 | 決定是否推送並開啟網站；同意就回「部署」 |
 | Task 18 | 實機操作清單 `docs/device-runs/M1.md` | 用 iPhone 照清單做，把 5 個檔案 AirDrop 到 Mac mini |
 
 ## 3. 也可以不用互動模式（無人值守）

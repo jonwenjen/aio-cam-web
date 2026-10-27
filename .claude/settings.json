@@ -42,11 +42,13 @@
       "WebFetch(domain:github.com)"
     ],
     "deny": [
-      "Bash(git push:*)",
       "Bash(gh repo create:*)",
-      "Bash(gh api:*)",
       "Bash(rm -rf:*)",
       "Read(test/private/**)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(gh api:*)"
     ]
   }
 }

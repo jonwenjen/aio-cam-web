@@ -11,4 +11,4 @@
 - 影像管線先做空操作測試（所有參數歸零 → 輸出與輸入位元相同）。
 - 瀏覽器測試用 `tools/run-browser.mjs`（獨立的無頭 Chrome，不碰使用者自己的 Chrome）。WebGPU 需要 `--enable-unsafe-webgpu --use-angle=metal` 且不能加 `--disable-gpu`；要模擬「沒有 WebGPU」只能注入腳本把 `navigator.gpu` 設成 undefined（Chrome 旗標關不掉）。
 - `test/private/` 是使用者的私人照片，**絕不 commit、絕不上傳**。
-- 檢查點 A、B 一定要停下來等使用者回覆。`git push`、建立 GitHub repo、開 Pages 只在檢查點 B 得到同意後才做。
+- 檢查點 A、B 一定要停下來等使用者回覆。repo 已在 GitHub（`jonwenjen/aio-cam-web`，公開）。`git push` 與開 Pages 只在檢查點 B 得到同意後才做。
