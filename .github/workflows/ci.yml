@@ -1,0 +1,16 @@
+# 品牌檢查＋單元測試。瀏覽器與 e2e 測試需要 macOS 的 GPU 與 Swift 量測工具，只在本機跑（見 README）。
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y libimage-exiftool-perl
+      - run: npm ci
+      - run: node tools/check-brands.mjs
+      - run: npm test
