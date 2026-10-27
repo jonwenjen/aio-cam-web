@@ -1,0 +1,101 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>io</title>
+<script>if (!new URLSearchParams(location.search).has("test")) history.replaceState(null, "", location.pathname + "?test=1");</script>
+<script type="module">
+  // Task 12：匯入、解碼（只解主圖）、匯出（HDR 重組、隱私、S4）、交付掛鉤
+  import { run } from './harness.js';
+  import { importFile, decodeUpright } from '../../js/io/import.js';
+  import { exportImage } from '../../js/io/export.js';
+  import { deliver } from '../../js/io/deliver.js';
+  import { analyze, parseMPF, iccDesc } from '../../js/io/jpeg.js';
+  import { parseTiff, getTag, TAG } from '../../js/io/tiff.js';
+  import { BUILTIN } from '../../js/looks/builtin.js';
+  import { normalize } from '../../js/looks/recipe.js';
+
+  const fileOf = async (name, type = 'image/jpeg') =>
+    new File([await (await fetch('../fixtures/' + name)).arrayBuffer()], name, { type });
+  const bytesOf = async file => new Uint8Array(await file.arrayBuffer());
+  const orientationOf = u => { const j = analyze(u); return getTag(parseTiff(u.subarray(j.exif.dataStart + 6, j.exif.end)), 'ifd0', TAG.Orientation); };
+
+  run(async () => {
+    const d = { failures: [] };
+    const check = (cond, msg) => { if (!cond) d.failures.push(msg); };
+
+    // gm_gps_rot6：HDR、方向 6
+    const gmFile = await fileOf('gm_gps_rot6.jpg');
+    const src = await importFile(gmFile);
+    d.import = { kind: src.kind, o: src.orientation, stored: [src.storedWidth, src.storedHeight], upright: [src.width, src.height], hdr: src.hasGainMap, cs: src.colorSpace, meta: src.meta };
+    check(src.kind === 'jpeg' && src.orientation === 6 && src.storedWidth === 384 && src.storedHeight === 512, 'import stored/orientation');
+    check(src.width === 512 && src.height === 384 && src.hasGainMap === true, 'import upright/gain map');
+    check(src.colorSpace === 'display-p3', 'colorSpace');
+    const bmp = await decodeUpright(src);
+    check(bmp.width === 512 && bmp.height === 384, `decodeUpright size ${bmp.width}x${bmp.height}`);
+    bmp.close();
+
+    const hdr = await exportImage(src, BUILTIN.asshot.recipe, { lookId: 'asshot' });
+    const out = await bytesOf(hdr.file);
+    const oj = analyze(out);
+    d.exportHdr = { hdr: hdr.hdr, notice: hdr.notice, name: hdr.file.name, sof: oj.sof, timings: hdr.timings };
+    check(hdr.hdr === true && hdr.notice === null, 'export hdr flag');
+    check(oj.sof.w === 384 && oj.sof.h === 512, 'output SOF is stored size');
+    const orig = src.bytes.subarray(src.jpeg.gainMap.start, src.jpeg.gainMap.end);
+    const e2 = parseMPF(out, oj.mpf).entries[1];
+    const gm = out.subarray(e2.abs, e2.abs + e2.size);
+    check(gm.length === orig.length && gm.every((v, i) => v === orig[i]), 'gain map bytes identical');
+    check(orientationOf(out) === 6, 'EXIF orientation still 6');
+    check(!oj.hasAROT, 'no AROT');
+    check(/^AIO_\d{8}_\d{6}_asshot\.jpg$/.test(hdr.file.name), 'file name ' + hdr.file.name);
+
+    // sRGB 無 ICC → SDR、方向 1、輸出 Display P3（Review Focus 3）
+    const srgb = await exportImage(await importFile(await fileOf('plain_srgb.jpg')), BUILTIN.hiyori.recipe, { lookId: 'hiyori' });
+    const so = await bytesOf(srgb.file), sj = analyze(so);
+    d.srgb = { hdr: srgb.hdr, icc: iccDesc(sj.icc), sof: sj.sof, notice: srgb.notice };
+    check(srgb.hdr === false && sj.mpf === null, 'sRGB is SDR');
+    check(orientationOf(so) === 1, 'sRGB orientation 1');
+    check(/Display P3/.test(iccDesc(sj.icc) ?? ''), 'ICC Display P3');
+
+    // 灰階 JPEG → 不丟錯，3 通道
+    const gray = await exportImage(await importFile(await fileOf('gray.jpg')), BUILTIN.natural.recipe, { lookId: 'natural' });
+    const gj = analyze(await bytesOf(gray.file));
+    d.gray = { sof: gj.sof };
+    check(gj.sof.comps === 3, 'gray output has 3 components');
+
+    // S4：P3 純綠存檔後讀回誤差 ≤ 1/255
+    {
+      const c = new OffscreenCanvas(64, 64);
+      const ctx = c.getContext('2d', { colorSpace: 'display-p3' });
+      ctx.putImageData(new ImageData(new Uint8ClampedArray(64 * 64 * 4).map((_, i) => [0, 255, 0, 255][i % 4]), 64, 64, { colorSpace: 'display-p3' }), 0, 0);
+      const png = new File([await c.convertToBlob({ type: 'image/png' })], 'green.png', { type: 'image/png' });
+      const recipe = normalize({ ...BUILTIN.asshot.recipe, grain: { amount: 0 }, vignette: { amount: 0 } });
+      const r = await exportImage(await importFile(png), recipe, { lookId: 'asshot' });
+      const back = await createImageBitmap(r.file, { colorSpaceConversion: 'default' });
+      const c2 = new OffscreenCanvas(64, 64);
+      const ctx2 = c2.getContext('2d', { colorSpace: 'display-p3' });
+      ctx2.drawImage(back, 0, 0);
+      const px = ctx2.getImageData(0, 0, 64, 64, { colorSpace: 'display-p3' }).data;
+      let worst = 0;
+      for (let i = 0; i < px.length; i += 4) worst = Math.max(worst, px[i], 255 - px[i + 1], px[i + 2]);
+      d.s4 = { worst, sample: [...px.subarray(0, 3)] };
+      check(worst <= 1, `S4 worst ${worst}`);
+    }
+
+    // 交付掛鉤（?test=1）
+    const before = window.__aio?.outputs?.length ?? 0;
+    const how = await deliver(hdr.file);
+    check(how === 'test' && window.__aio.outputs.length === before + 1, `deliver ${how}`);
+    check(window.__aio.outputs.at(-1).name === hdr.file.name, 'deliver name');
+
+    // 損壞檔案 → decode-failed
+    {
+      const broken = new File([(await bytesOf(gmFile)).subarray(0, 1000)], 'broken.jpg', { type: 'image/jpeg' });
+      let msg = null;
+      try { await decodeUpright(await importFile(broken)); } catch (e) { msg = e.message; }
+      d.broken = msg;
+      check(msg === 'decode-failed', 'broken file error ' + msg);
+    }
+
+    d.pass = d.failures.length === 0;
+    return d;
+  });
+</script>

@@ -12,6 +12,8 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT = ROOT + 'test/out/';
 const TIMEOUT_MS = 120_000;
 const GPU_ARGS = ['--enable-unsafe-webgpu', '--use-angle=metal'];
+// module script（含它 import 的檔案）載入失敗不會丟 Runtime.exceptionThrown，在這裡直接判失敗
+const SCRIPT_LOAD_GUARD = "addEventListener('error',e=>{const t=e.target;if(t&&t.tagName==='SCRIPT')window.__result={pass:false,details:{error:'script load failed: '+(t.src||'inline module graph')}}},true)";
 const NO_WEBGPU = "Object.defineProperty(Navigator.prototype,'gpu',{get:()=>undefined,configurable:true})";
 
 export const RUNS = [
@@ -32,7 +34,7 @@ export async function runPage(url, run, { timeoutMs = TIMEOUT_MS } = {}) {
     if (!result) result = { pass: false, details: { error: errors.length ? 'uncaught error' : `timeout after ${timeoutMs / 1000}s` } };
     const pass = !!result.pass && errors.length === 0;
     return { pass, details: result.details, errors: [...errors], logs: [...logs], ms: Date.now() - t0 };
-  }, { url, gpu: true, chromeArgs: GPU_ARGS, initScripts: run.initScripts, settleMs: 500 });
+  }, { url, gpu: true, chromeArgs: GPU_ARGS, initScripts: [SCRIPT_LOAD_GUARD, ...run.initScripts], settleMs: 500 });
 }
 
 async function main() {
