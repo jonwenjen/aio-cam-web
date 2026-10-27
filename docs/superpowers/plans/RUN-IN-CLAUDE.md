@@ -35,8 +35,8 @@ claude                          # 開互動模式
 | 何時 | Claude 會給你 | 你要做的 |
 |---|---|---|
 | 檢查點 A（Task 11 後） | `npm run check` 結果、7 組發色 × 3 種引擎的色差表 | 看數字是否都在門檻內（mean ≤ 0.5、max ≤ 2.0），回「繼續」 |
-| 檢查點 B（Task 15 後） | 完整測試結果、輸出檔驗證表、兩張手機尺寸截圖 | 決定是否建立公開 repo 並部署；同意就回「部署」 |
-| Task 17 | 實機操作清單 `docs/device-runs/M1.md` | 用 iPhone 照清單做，把 5 個檔案 AirDrop 到 Mac mini |
+| 檢查點 B（Task 16 後） | 完整測試結果、輸出檔驗證表、自動調整 S20 量測表、兩張手機尺寸截圖 | 決定是否建立公開 repo 並部署；同意就回「部署」 |
+| Task 18 | 實機操作清單 `docs/device-runs/M1.md` | 用 iPhone 照清單做，把 5 個檔案 AirDrop 到 Mac mini |
 
 ## 3. 也可以不用互動模式（無人值守）
 
