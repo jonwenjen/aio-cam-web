@@ -27,4 +27,23 @@ async function start() {
   }
 }
 
-start();
+/**
+ * Service Worker（離線）。本機開發時不註冊（快取優先會讓改過的檔案看不到），要測試就加 ?sw=1。
+ * 有新版本在等待時顯示「有新版本，點此更新」。
+ */
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  if (local && !params.has('sw')) return;
+  const reg = await navigator.serviceWorker.register('./sw.js');
+  const offer = worker => showToast(t('update.available'), { ms: 0, onAction: () => worker.postMessage('skipWaiting') });
+  if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
+  reg.addEventListener('updatefound', () => {
+    const w = reg.installing;
+    w?.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) offer(w); });
+  });
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded) { reloaded = true; location.reload(); } });
+}
+
+start().then(() => registerServiceWorker().catch(e => console.warn('service worker', e)));

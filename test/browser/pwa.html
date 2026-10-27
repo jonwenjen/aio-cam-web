@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>pwa</title>
+<script type="module">
+  // Task 16：Service Worker 安裝後，PRECACHE 全部在快取裡；manifest 可解析、圖示可載入。
+  import { run } from './harness.js';
+  run(async () => {
+    const d = { failures: [] };
+    const swText = await (await fetch('/sw.js')).text();
+    const version = /const VERSION = '([^']+)'/.exec(swText)[1];
+    const precache = JSON.parse(/const PRECACHE = (\[[\s\S]*?\]);/.exec(swText)[1]);
+    await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    const reg = await navigator.serviceWorker.ready;
+    d.active = !!reg.active;
+    const cache = await caches.open('aio-cam-' + version);
+    const missing = [];
+    for (const p of precache) if (!(await cache.match(new URL(p, location.origin + '/')))) missing.push(p);
+    d.precached = precache.length - missing.length;
+    if (missing.length) d.failures.push('not cached: ' + missing.join(', '));
+    const manifest = await (await fetch('/manifest.webmanifest')).json();
+    d.manifest = { name: manifest.name, icons: manifest.icons.length };
+    for (const icon of manifest.icons) {
+      const img = new Image();
+      img.src = new URL(icon.src, location.origin + '/').href;
+      try { await img.decode(); } catch { d.failures.push('icon not loadable: ' + icon.src); continue; }
+      if (`${img.naturalWidth}x${img.naturalHeight}` !== icon.sizes) d.failures.push(`icon ${icon.src} is ${img.naturalWidth}x${img.naturalHeight}`);
+    }
+    d.pass = d.failures.length === 0;
+    return d;
+  });
+</script>
