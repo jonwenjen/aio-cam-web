@@ -6,6 +6,8 @@
   import { run } from './harness.js';
   run(async () => {
     const d = { failures: [] };
+
+
     const swText = await (await fetch('/sw.js')).text();
     const version = /const VERSION = '([^']+)'/.exec(swText)[1];
     const precache = JSON.parse(/const PRECACHE = (\[[\s\S]*?\]);/.exec(swText)[1]);

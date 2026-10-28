@@ -36,14 +36,20 @@ async function registerServiceWorker() {
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
   if (local && !params.has('sw')) return;
   const reg = await navigator.serviceWorker.register('./sw.js');
-  const offer = worker => showToast(t('update.available'), { ms: 0, onAction: () => worker.postMessage('skipWaiting') });
+  // 只有使用者按下「更新」才重新載入；第一次安裝時 clients.claim() 也會觸發 controllerchange，
+  // 那時重新載入會把使用者已選的照片清掉
+  let userAskedUpdate = false;
+  const offer = worker => showToast(t('update.available'), {
+    ms: 0, onAction: () => { userAskedUpdate = true; worker.postMessage('skipWaiting'); },
+  });
   if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
   reg.addEventListener('updatefound', () => {
     const w = reg.installing;
     w?.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) offer(w); });
   });
-  let reloaded = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded) { reloaded = true; location.reload(); } });
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (userAskedUpdate) { userAskedUpdate = false; location.reload(); }
+  });
 }
 
 start().then(() => registerServiceWorker().catch(e => console.warn('service worker', e)));
