@@ -1,5 +1,6 @@
 // 驗證輸出檔：S2（HDR）、S3（EXIF 一致）、S16（隱私開關）。用 exiftool 與 Apple ImageIO（tools/bin/*）。
-// 用法：node tools/verify-output.mjs <original> <output> --privacy=keep|noLocation|minimal [--json]
+// 用法：node tools/verify-output.mjs <original> <output> --privacy=keep|noLocation|minimal [--no-s2] [--json]
+//   --no-s2：換了發色的輸出不比 HDR 峰值（只檢查 EXIF／隱私）
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { VERSION } from '../js/version.js';
@@ -23,14 +24,14 @@ function hdrmeasure(path) {
   return { max: Number(/HDR max ([\d.]+)/.exec(s)?.[1]), over: Number(/pixels>1\.0: ([\d.]+)%/.exec(s)?.[1]), raw: s.trim() };
 }
 
-export function verify(original, output, privacy) {
+export function verify(original, output, privacy, { s2 = true } = {}) {
   const checks = [];
   const add = (id, ok, detail) => checks.push({ id, ok: !!ok, detail });
   const a = exif(original), b = exif(output);
   const ga = gmcheck(original), gb = gmcheck(output);
 
   // S2：原圖有增益圖時，HDR 峰值與高光面積必須接近原圖
-  if (ga.apple || ga.iso) {
+  if (s2 && (ga.apple || ga.iso)) {
     const ha = hdrmeasure(original), hb = hdrmeasure(output);
     add('S2 HDR max ±5%', Math.abs(hb.max - ha.max) / ha.max <= 0.05, `${ha.max} → ${hb.max}`);
     add('S2 pixels>1.0 ±3pt', Math.abs(hb.over - ha.over) <= 3, `${ha.over}% → ${hb.over}%`);
@@ -67,10 +68,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [original, output] = args.filter(x => !x.startsWith('--'));
   const privacy = (args.find(x => x.startsWith('--privacy=')) ?? '--privacy=keep').split('=')[1];
   if (!original || !output || !['keep', 'noLocation', 'minimal'].includes(privacy)) {
-    console.error('usage: node tools/verify-output.mjs <original> <output> --privacy=keep|noLocation|minimal [--json]');
+    console.error('usage: node tools/verify-output.mjs <original> <output> --privacy=keep|noLocation|minimal [--no-s2] [--json]');
     process.exit(2);
   }
-  const r = verify(original, output, privacy);
+  const r = verify(original, output, privacy, { s2: !args.includes('--no-s2') });
   if (args.includes('--json')) console.log(JSON.stringify(r, null, 2));
   else for (const c of r.checks) console.log(`${c.ok ? '✅' : '❌'} ${c.id}  ${c.detail ?? ''}`);
   process.exit(r.ok ? 0 : 1);
