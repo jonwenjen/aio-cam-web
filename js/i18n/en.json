@@ -66,5 +66,6 @@
  "debug.title": "Debug info",
  "debug.copy": "Copy JSON",
  "update.available": "New version available — tap to update",
- "toast.dismiss": "Dismiss message"
+ "toast.dismiss": "Dismiss message",
+ "settings.debug": "Show debug info"
 }

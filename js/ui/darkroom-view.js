@@ -23,6 +23,7 @@ import { getDeviceProfile } from '../device.js';
 const HOLD_MS = 150;
 const AUTO_ON_IMPORT = 'aio.autoOnImport';
 const HEIC_HINT = 'aio.heicHintShown';
+const DEBUG = 'aio.debug'; // 從主畫面開啟時網址沒有 ?debug=1，所以設定裡的開關要記住
 
 const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* 私密瀏覽 */ } };
@@ -63,6 +64,7 @@ const TEMPLATE = `
 </header>
 <section id="settings-panel" hidden>
   <label class="switch"><input type="checkbox" id="auto-on-import"><span id="auto-on-import-label"></span></label>
+  <label class="switch"><input type="checkbox" id="debug-toggle"><span id="debug-toggle-label"></span></label>
 </section>
 <main id="preview">
   <canvas id="preview-canvas"></canvas>
@@ -291,18 +293,29 @@ export function mountDarkroom(root, { debug = false } = {}) {
   // 裝置畫布上限（spec §10）：稍後在背景量一次，避免和第一次匯入搶記憶體
   setTimeout(() => getDeviceProfile().then(p => { state.maxPixels = p.maxCanvasPixels; }).catch(() => {}), 1500);
 
-  const debugPanel = debug ? mountDebugPanel(root.querySelector('.toolbar'), root, async () => ({
-    device: await (await import('../device.js')).getDeviceProfile(),
+  const debugInfo = async () => ({
+    device: await getDeviceProfile(),
     lastExport: state.lastExport,
     autoMs: state.autoMs,
     scene: state.stats && { light: state.stats.light, scenes: state.stats.scenes, cast: state.stats.cast, logMeanY: state.stats.logMeanY },
     recipe: state.recipe,
-  })) : null;
+  });
+  let debugPanel = null;
+  function setDebug(on) {
+    lsSet(DEBUG, on ? '1' : '0');
+    els.debugToggle.checked = on;
+    if (on && !debugPanel) debugPanel = mountDebugPanel(root.querySelector('.toolbar'), root, debugInfo);
+    if (!on && debugPanel) { debugPanel.destroy(); debugPanel = null; }
+  }
+  els.debugToggle = $('#debug-toggle');
+  els.debugToggle.addEventListener('change', () => setDebug(els.debugToggle.checked));
+  setDebug(debug || lsGet(DEBUG) === '1');
 
   // ---- 畫面 ----
   function renderTexts() {
     $('#settings-btn').textContent = t('settings.button');
     $('#auto-on-import-label').textContent = t('settings.autoOnImport');
+    $('#debug-toggle-label').textContent = t('settings.debug');
     els.lang.setAttribute('aria-label', t('lang.label'));
     els.lang.value = getLang();
     els.canvas.setAttribute('aria-label', t('preview.label') + '，' + t('compare.hint'));

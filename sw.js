@@ -1,7 +1,7 @@
 // Service Worker：App 檔案離線可用（spec §12）。ES module 不能 importScripts，版本字串寫死，
 // 由 test/unit/sw-precache.test.mjs 確認與 js/version.js 相同、PRECACHE 涵蓋所有 App 檔案、BUILD 是最新的。
 const VERSION = '0.1.0';
-const BUILD = '8f71e74cf5e0b925';            // 由 tools/stamp-sw.mjs 寫入：預先快取檔案的內容雜湊
+const BUILD = '4519e3b74d7f599a';            // 由 tools/stamp-sw.mjs 寫入：預先快取檔案的內容雜湊
 const CACHE = 'aio-cam-' + VERSION + '-' + BUILD;
 const PRECACHE = [
   "./css/app.css",

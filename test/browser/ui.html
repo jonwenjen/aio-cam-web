@@ -124,6 +124,18 @@
     await load();
     check($('#privacy [data-privacy="noLocation"]').getAttribute('aria-pressed') === 'true', 'privacy remembered after reload');
 
+    // 從主畫面開啟時沒有 ?debug=1：設定裡要能打開除錯資訊，而且會記住
+    check(!$('#debug-btn'), 'no debug button by default');
+    $('#settings-btn').click();
+    $('#debug-toggle').click();
+    check(!!$('#debug-btn') && visible($('#debug-btn')), 'settings toggle shows the debug button');
+    await load();
+    check(!!$('#debug-btn'), 'debug toggle remembered after reload');
+    $('#settings-btn').click();
+    $('#debug-toggle').click();
+    check(!$('#debug-btn'), 'turning the toggle off removes the debug button');
+    $('#settings-btn').click();
+
     // 無障礙：可及名稱、觸控高度
     await importFixture('gm_gps_rot6.jpg');
     const controls = $$('button, input, select, [role=button]').filter(visible);

@@ -66,5 +66,6 @@
  "debug.title": "除錯資訊",
  "debug.copy": "複製 JSON",
  "update.available": "有新版本，點此更新",
- "toast.dismiss": "關閉訊息"
+ "toast.dismiss": "關閉訊息",
+ "settings.debug": "顯示除錯資訊"
 }

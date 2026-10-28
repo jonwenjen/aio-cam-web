@@ -21,5 +21,5 @@ export function mountDebugPanel(toolbar, root, getInfo) {
   root.append(panel);
   const label = () => { btn.textContent = t('debug.button'); h2.textContent = t('debug.title'); copy.textContent = t('debug.copy'); };
   label();
-  return { label, refresh: () => (panel.hidden ? null : refresh()) };
+  return { label, refresh: () => (panel.hidden ? null : refresh()), destroy: () => { btn.remove(); panel.remove(); } };
 }
