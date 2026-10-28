@@ -8,22 +8,23 @@
     const d = { failures: [] };
 
 
-    const swText = await (await fetch('/sw.js')).text();
+    const appRoot = new URL('../../', location.href); // 本機根目錄與 GitHub Pages 子路徑都能用
+    const swText = await (await fetch(new URL('sw.js', appRoot))).text();
     const version = /const VERSION = '([^']+)'/.exec(swText)[1] + '-' + /const BUILD = '([^']*)'/.exec(swText)[1];
     const precache = JSON.parse(/const PRECACHE = (\[[\s\S]*?\]);/.exec(swText)[1]);
-    await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    await navigator.serviceWorker.register(new URL('sw.js', appRoot), { scope: appRoot.pathname });
     const reg = await navigator.serviceWorker.ready;
     d.active = !!reg.active;
     const cache = await caches.open('aio-cam-' + version);
     const missing = [];
-    for (const p of precache) if (!(await cache.match(new URL(p, location.origin + '/')))) missing.push(p);
+    for (const p of precache) if (!(await cache.match(new URL(p, appRoot)))) missing.push(p);
     d.precached = precache.length - missing.length;
     if (missing.length) d.failures.push('not cached: ' + missing.join(', '));
-    const manifest = await (await fetch('/manifest.webmanifest')).json();
+    const manifest = await (await fetch(new URL('manifest.webmanifest', appRoot))).json();
     d.manifest = { name: manifest.name, icons: manifest.icons.length };
     for (const icon of manifest.icons) {
       const img = new Image();
-      img.src = new URL(icon.src, location.origin + '/').href;
+      img.src = new URL(icon.src, appRoot).href;
       try { await img.decode(); } catch { d.failures.push('icon not loadable: ' + icon.src); continue; }
       if (`${img.naturalWidth}x${img.naturalHeight}` !== icon.sizes) d.failures.push(`icon ${icon.src} is ${img.naturalWidth}x${img.naturalHeight}`);
     }
