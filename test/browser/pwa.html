@@ -9,7 +9,7 @@
 
 
     const swText = await (await fetch('/sw.js')).text();
-    const version = /const VERSION = '([^']+)'/.exec(swText)[1];
+    const version = /const VERSION = '([^']+)'/.exec(swText)[1] + '-' + /const BUILD = '([^']*)'/.exec(swText)[1];
     const precache = JSON.parse(/const PRECACHE = (\[[\s\S]*?\]);/.exec(swText)[1]);
     await navigator.serviceWorker.register('/sw.js', { scope: '/' });
     const reg = await navigator.serviceWorker.ready;

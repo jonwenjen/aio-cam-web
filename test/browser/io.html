@@ -80,6 +80,24 @@
       check(worst <= 1, `S4 worst ${worst}`);
     }
 
+    // 裝置畫布上限（spec §10）：超過就縮到可行尺寸並告知，改走 SDR
+    {
+      const r = await exportImage(await importFile(await fileOf('gm_gps_rot6.jpg')), BUILTIN.asshot.recipe, { lookId: 'asshot', maxPixels: 100000 });
+      const j = analyze(await bytesOf(r.file));
+      d.canvasLimit = { notice: r.notice, hdr: r.hdr, sof: j.sof };
+      check(r.notice === 'downscaled' && r.hdr === false && j.sof.w * j.sof.h <= 100000, 'over the canvas limit → downscaled SDR');
+      check(orientationOf(await bytesOf(r.file)) === 1, 'downscaled output is upright (orientation 1)');
+    }
+
+    // SDR 路徑以實際解碼尺寸為準：中繼資料推算的尺寸錯了（例如 HEIC 的 irot）也要能存檔
+    {
+      const s0 = await importFile(await fileOf('plain_srgb.jpg'));
+      let r = null, err = null;
+      try { r = await exportImage({ ...s0, width: s0.height, height: s0.width }, BUILTIN.asshot.recipe, { lookId: 'asshot' }); } catch (e) { err = String(e); }
+      d.wrongMetaSize = r ? analyze(await bytesOf(r.file)).sof : err;
+      check(r && analyze(await bytesOf(r.file)).sof.w === 768, 'SDR export uses the decoded size: ' + err);
+    }
+
     // 交付掛鉤（?test=1）
     const before = window.__aio?.outputs?.length ?? 0;
     const how = await deliver(hdr.file);

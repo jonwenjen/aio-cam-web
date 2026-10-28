@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>share</title>
+<style>body { margin: 0 } iframe { width: 440px; height: 956px; border: 0 }</style>
+<iframe id="app"></iframe>
+<script type="module">
+  // Review Focus 1、2：分享面板拒絕（使用者手勢過期）與取消。?test=share 時 App 走真的 navigator.share（這裡換成假的）。
+  import { run } from './harness.js';
+  const frame = document.getElementById('app');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const W = () => frame.contentWindow;
+  const $ = s => frame.contentDocument.querySelector(s);
+  const S = () => W().__aio.state;
+  async function until(what, fn, ms = 30000) {
+    const t0 = performance.now();
+    while (performance.now() - t0 < ms) { try { if (fn()) return; } catch { /* 還沒好 */ } await sleep(50); }
+    throw new Error('timeout: ' + what);
+  }
+  let mode = 'ok';
+  const shared = [];
+  run(async () => {
+    const d = { failures: [] };
+    const check = (c, m) => { if (!c) d.failures.push(m); };
+    frame.src = '../../?test=share';
+    await new Promise(r => frame.addEventListener('load', r, { once: true }));
+    await until('ready', () => W().__aio?.ready);
+    Object.defineProperty(W().navigator, 'canShare', { configurable: true, value: () => true });
+    Object.defineProperty(W().navigator, 'share', { configurable: true, value: async ({ files }) => {
+      shared.push(files[0]);
+      if (mode !== 'ok') { const DOMEx = W().DOMException; throw new DOMEx('stub', mode); }
+    } });
+    const bytes = await (await fetch('../fixtures/gm_gps_rot6.jpg')).arrayBuffer();
+    const dt = new (W().DataTransfer)();
+    dt.items.add(new (W().File)([bytes], 'gm_gps_rot6.jpg', { type: 'image/jpeg' }));
+    $('#file-input').files = dt.files;
+    $('#file-input').dispatchEvent(new (W().Event)('change', { bubbles: true }));
+    await until('import', () => S().previewReady && !S().rendering);
+    const toastText = () => $('#toasts')?.textContent ?? '';
+    const save = async () => { $('#save-btn').click(); await sleep(50); await until('save done', () => !S().busy); };
+
+    // 1. 手勢過期 → 「點這裡分享／儲存」，不是錯誤；改隱私後必須作廢舊檔（否則會分享到含 GPS 的舊檔）
+    mode = 'NotAllowedError';
+    await save();
+    check(S().pendingShare && $('#save-label').textContent === '點這裡分享／儲存', 'needsTap → tap-to-share button');
+    check(!/錯誤/.test(toastText()), 'needsTap shows no error');
+    $('#privacy [data-privacy="noLocation"]').click();
+    check(!S().pendingShare && $('#save-label').textContent === '存檔', 'privacy change invalidates the pending file');
+
+    // 2. 再一次手勢過期 → 改發色也要作廢
+    await save();
+    check(S().pendingShare, 'needsTap again');
+    $('#looks [data-look="hiyori"]').click();
+    check(!S().pendingShare, 'look change invalidates the pending file');
+    await until('render', () => !S().rendering);
+
+    // 3. 手勢過期 → 按「點這裡分享」直接分享同一個檔案，不重做處理
+    await save();
+    const exports1 = S().exportCount;
+    mode = 'ok';
+    const n = shared.length;
+    $('#save-btn').click();
+    await until('shared', () => shared.length === n + 1 && !S().busy);
+    check(shared.at(-1) === shared.at(-2), 'tap-to-share shares the same file');
+    check(S().exportCount === exports1, 'tap-to-share does not re-export');
+
+    // 4. 取消 → 不顯示錯誤；再按存檔直接開分享面板，不重做處理
+    mode = 'AbortError';
+    await save();
+    const exports2 = S().exportCount;
+    check(!/錯誤/.test(toastText()), 'cancel shows no error');
+    mode = 'ok';
+    const m = shared.length;
+    $('#save-btn').click();
+    await until('re-shared', () => shared.length === m + 1 && !S().busy);
+    d.step4 = { exports2, after: S().exportCount, pending: !!S().pendingShare, m, shared: shared.length, sameFile: shared.at(-1) === shared.at(-2), names: shared.slice(-2).map(f => f.name + ':' + f.size + ':' + f.lastModified) };
+    check(S().exportCount === exports2, 'save after cancel does not re-export');
+    check(shared.at(-1) === shared.at(-2), 'save after cancel shares the same file');
+
+    d.exports = S().exportCount; d.shares = shared.length;
+    d.pass = d.failures.length === 0;
+    return d;
+  });
+</script>

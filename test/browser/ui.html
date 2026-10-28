@@ -135,6 +135,25 @@
     check(primary.length === 0, 'primary buttons under 56px: ' + primary.join(', '));
     d.controls = controls.length;
 
+    // 連續選兩張：慢的第一張（大圖）晚完成也不能蓋掉第二張
+    const big = await fetch('../external/s20/s20_03.jpg');
+    if (big.ok) {
+      const Wd = win();
+      const pick = (bytes, name) => {
+        const dt = new Wd.DataTransfer();
+        dt.items.add(new Wd.File([bytes], name, { type: 'image/jpeg' }));
+        $('#file-input').files = dt.files;
+        $('#file-input').dispatchEvent(new Wd.Event('change', { bubbles: true }));
+      };
+      const n0 = state().importCount;
+      pick(await big.arrayBuffer(), 'big.jpg');
+      pick(await (await fetch('../fixtures/gm_gps_rot6.jpg')).arrayBuffer(), 'small.jpg');
+      await waitFor('both imports', () => state().importCount >= n0 + 2 && !state().rendering, 60000);
+      await sleep(500);
+      d.lastImport = state().src?.name;
+      check(state().src?.name === 'small.jpg', 'the photo picked last stays: ' + state().src?.name);
+    } else d.lastImport = 'skipped (run tools/fetch-fixtures.sh)';
+
     check(errors.length === 0, 'errors in app: ' + errors.join(' | '));
     d.pass = d.failures.length === 0;
     return d;

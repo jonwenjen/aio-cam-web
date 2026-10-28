@@ -82,26 +82,22 @@ export function buildPrimaryMetadata(src, { privacy, encodedRecipe, software, ou
   setAscii(t, 'ifd0', TAG.Software, software);
   setDims(t, outWidth, outHeight);
   if (privacy === 'noLocation') dropIfd(t, 'gps');
+  // EXIF 縮圖（IFD1）是未修改的原圖，SDR 路徑上方向也可能不對：一律拿掉，避免看起來像沒存到修圖結果
+  dropIfd(t, 'ifd1');
 
   let packets = src.kind === 'jpeg' && src.jpeg ? xmpPacketsOf(src.bytes, src.jpeg) : [];
   if (privacy === 'noLocation') packets = packets.map(stripLocation);
   packets = packets.length ? [withRecipe(packets[0], encodedRecipe), ...packets.slice(1)] : [withRecipe(null, encodedRecipe)];
   const app1Xmp = packets.map(xmpApp1);
 
-  // 超過 APP1 上限：先拿掉縮圖，仍超過就改用最小 EXIF
+  // 超過 APP1 上限（縮圖已拿掉）：改用最小 EXIF 並告知
   let notice = null, app1Exif;
   try {
     app1Exif = exifApp1(writeTiff(t));
   } catch (e) {
     if (!(e instanceof RangeError)) throw e;
-    dropIfd(t, 'ifd1');
-    try {
-      app1Exif = exifApp1(writeTiff(t));
-    } catch (e2) {
-      if (!(e2 instanceof RangeError)) throw e2;
-      app1Exif = exifApp1(writeTiff(minimalTiff(src, out)));
-      notice = 'exifTooLarge';
-    }
+    app1Exif = exifApp1(writeTiff(minimalTiff(src, out)));
+    notice = 'exifTooLarge';
   }
   return { app1Exif, app1Xmp, notice };
 }

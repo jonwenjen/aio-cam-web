@@ -2,7 +2,8 @@
 
 /** @returns {Promise<'shared'|'downloaded'|'cancelled'|'needsTap'|'test'>} */
 export async function deliver(file) {
-  if (new URLSearchParams(location.search).has('test')) {
+  const test = new URLSearchParams(location.search).get('test');
+  if (test !== null && test !== 'share') { // ?test=share：測試分享面板的拒絕與取消（navigator.share 由測試替換）
     window.__aio ??= { outputs: [] };
     window.__aio.outputs ??= [];
     window.__aio.outputs.push({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
@@ -25,14 +26,19 @@ export async function deliver(file) {
 
 /** 使用者按下「點這裡分享／儲存」時直接呼叫（此時有新的使用者手勢） */
 export async function shareNow(file) {
-  try {
-    await navigator.share({ files: [file] });
-    return 'shared';
-  } catch (e) {
-    if (e?.name === 'AbortError') return 'cancelled';
-    download(file);
-    return 'downloaded';
+  let canShare = false;
+  try { canShare = !!navigator.canShare?.({ files: [file] }); } catch { /* 不支援 */ }
+  if (canShare) {
+    try {
+      await navigator.share({ files: [file] });
+      return 'shared';
+    } catch (e) {
+      if (e?.name === 'AbortError') return 'cancelled';
+      if (e?.name === 'NotAllowedError') return 'needsTap';
+    }
   }
+  download(file);
+  return 'downloaded';
 }
 
 function download(file) {

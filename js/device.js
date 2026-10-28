@@ -54,7 +54,10 @@ export async function getDeviceProfile({ prefer } = {}) {
     maxTexture2D,
     p3Canvas: p3CanvasSupported(),
     shareFiles,
-    maxCanvasMP: (CANVAS_SIZES.find(([, w, h]) => canvasWorks(w, h)) ?? [12])[0],
+    ...(() => {
+      const [mp, w, h] = CANVAS_SIZES.find(([, w, h]) => canvasWorks(w, h)) ?? CANVAS_SIZES.at(-1);
+      return { maxCanvasMP: mp, maxCanvasPixels: w * h };
+    })(),
     wakeLock: 'wakeLock' in navigator,
     opfs: typeof navigator.storage?.getDirectory === 'function',
     videoEncoder: typeof VideoEncoder !== 'undefined',

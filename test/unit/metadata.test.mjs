@@ -136,3 +136,19 @@ test('70KB UserComment → falls back to minimal with notice exifTooLarge', () =
   const t2 = parseTiff(meta.app1Exif.subarray(10));
   assert.equal(t2.exif.get(0x9286), undefined);
 });
+
+test('the embedded EXIF thumbnail (unedited, possibly wrongly rotated) is never kept', () => {
+  // 有縮圖但不會超過 APP1 上限的 EXIF：拿掉 big_exif 那段很長的 UserComment
+  const u = read('big_exif.jpg');
+  const t0 = parseTiff(sourceOf(u).exifTiff);
+  t0.exif.delete(0x9286);
+  assert.ok(t0.thumbnail);
+  const src = { ...sourceOf(u), exifTiff: writeTiff(t0) };
+  for (const privacy of ['keep', 'noLocation']) {
+    const meta = buildPrimaryMetadata(src, { privacy, encodedRecipe: RECIPE, software: 'x',
+      outWidth: 768, outHeight: 512, outOrientation: 1 });
+    const t = parseTiff(meta.app1Exif.subarray(10));
+    assert.equal(t.ifd1, null, privacy);
+    assert.equal(t.thumbnail, null, privacy);
+  }
+});

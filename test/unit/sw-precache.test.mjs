@@ -4,6 +4,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { ROOT } from './helpers.mjs';
 import { VERSION } from '../../js/version.js';
+import { precacheList, buildHash } from '../../tools/stamp-sw.mjs';
 
 const sw = readFileSync(ROOT + 'sw.js', 'utf8');
 const PRECACHE = JSON.parse(/const PRECACHE = (\[[\s\S]*?\]);/.exec(sw)[1]);
@@ -33,4 +34,14 @@ test('manifest uses relative paths and has 192/512 maskable icons', () => {
   assert.equal(m.display, 'standalone');
   assert.deepEqual(m.icons.map(i => i.sizes).sort(), ['192x192', '512x512']);
   for (const i of m.icons) { assert.ok(!i.src.startsWith('/')); assert.match(i.purpose, /maskable/); assert.ok(existsSync(ROOT + i.src)); }
+});
+
+test('sw.js BUILD hash matches the precached files (any app change updates installed copies)', () => {
+  const want = buildHash(precacheList());
+  const got = /const BUILD = '([0-9a-f]+)'/.exec(sw)?.[1];
+  assert.equal(got, want, 'run: node tools/stamp-sw.mjs');
+});
+
+test('precache bypasses the HTTP cache', () => {
+  assert.match(sw, /cache: 'reload'/);
 });

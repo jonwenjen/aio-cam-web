@@ -17,6 +17,8 @@ import { renderLookStrip, markSelectedLook } from './look-strip.js';
 import { renderRecommendRow, markSelectedRec } from './recommend-row.js';
 import { renderPrivacy, loadPrivacy, savePrivacy } from './save-sheet.js';
 import { mountDebugPanel } from './debug-panel.js';
+import { canvasFor } from './canvas-kind.js';
+import { getDeviceProfile } from '../device.js';
 
 const HOLD_MS = 150;
 const AUTO_ON_IMPORT = 'aio.autoOnImport';
@@ -91,7 +93,7 @@ export function mountDarkroom(root, { debug = false } = {}) {
   const state = {
     src: null, bitmap: null, thumb: null, stats: null, recommendations: null,
     recipe: normalize({}), autoOn: false, recipeBeforeAuto: null,
-    privacy: loadPrivacy(), busy: false, pendingShare: null, lastExport: null, autoMs: null,
+    privacy: loadPrivacy(), busy: false, pendingShare: null, lastExport: null, autoMs: null, exportCount: 0, maxPixels: Infinity,
     previewReady: false, rendering: false, renderCount: 0, importCount: 0, lastPreviewHash: null, showOriginal: false,
   };
   const els = {
@@ -126,7 +128,8 @@ export function mountDarkroom(root, { debug = false } = {}) {
       try {
         const bmp = state.bitmap;
         const params = paramsFor(state.showOriginal ? ORIGINAL : state.recipe, bmp);
-        await renderWithRecovery(e => e.renderToCanvas(bmp, params, els.canvas));
+        // 引擎可能在 GPU 遺失後換了種類：畫布 context 不合就換一張（canvas-kind.js）
+        await renderWithRecovery(e => e.renderToCanvas(bmp, params, (els.canvas = canvasFor(els.canvas, e.kind))));
         state.lastPreviewHash = previewHash(els.canvas); // 同一個 task 內讀，WebGPU 畫布才還在
         state.previewReady = true;
         state.renderCount++;
@@ -140,13 +143,14 @@ export function mountDarkroom(root, { debug = false } = {}) {
     const canvases = recCanvases;
     recs.forEach((r, i) => enqueue(async () => {
       const recipe = withBase(state.recipe, BUILTIN[r.lookId].recipe);
-      await renderWithRecovery(e => e.renderToCanvas(thumb, paramsFor(recipe, thumb), canvases[i]));
+      await renderWithRecovery(e => e.renderToCanvas(thumb, paramsFor(recipe, thumb), (canvases[i] = canvasFor(canvases[i], e.kind))));
     }));
   }
 
   // ---- 動作 ----
   function setRecipe(recipe) {
     state.recipe = normalize(recipe);
+    state.pendingShare = null; // 待分享的檔案是舊的編輯結果，作廢
     render();
     schedulePreview();
   }
@@ -174,21 +178,28 @@ export function mountDarkroom(root, { debug = false } = {}) {
     scheduleRecs();
   }
 
+  let importToken = 0;
   async function onFiles(files) {
     if (!files?.length) return;
     if (files.length > 1) showToast(t('notice.batchLater'));
+    const token = ++importToken; // 連續選兩張時，較慢的前一張完成後直接丟棄
     state.previewReady = false;
+    let bitmap = null;
     try {
       const src = await importFile(files[0]);
+      if (token !== importToken) return;
       const longest = Math.min(2048, Math.round(devicePixelRatio * Math.max(els.preview.clientWidth, els.preview.clientHeight)) || 2048);
-      const bitmap = await decodeUpright(src, { maxLongSide: longest });
+      bitmap = await decodeUpright(src, { maxLongSide: longest });
+      if (token !== importToken) return;
       const thumb = await thumbnailOf(src);
+      if (token !== importToken) return;
       const t0 = performance.now();
       const stats = analyzeScene(thumb, exifForAnalysis(src));
       const recs = recommend(stats);
       state.autoMs = +(performance.now() - t0).toFixed(1);
       state.bitmap?.close();
       Object.assign(state, { src, bitmap, thumb, stats, recommendations: recs, autoOn: false, recipeBeforeAuto: null, pendingShare: null });
+      bitmap = null; // 已交給 state
       // 換照片：保留發色與強度，曝光與自動歸零
       state.recipe = withBase(normalize({ intensity: state.recipe.intensity }), BUILTIN[state.recipe.base].recipe);
       recCanvases = renderRecommendRow(els.recommend, recs, { selected: state.recipe.base, onPick: pickLook });
@@ -197,9 +208,12 @@ export function mountDarkroom(root, { debug = false } = {}) {
       render();
       schedulePreview();
     } catch (e) {
-      showToast(t(e?.message === 'decode-failed' ? 'error.decode' : 'error.generic'));
-      if (e?.message !== 'decode-failed') console.error(e);
+      if (token === importToken) {
+        showToast(t(e?.message === 'decode-failed' ? 'error.decode' : 'error.generic'));
+        if (e?.message !== 'decode-failed') console.error(e);
+      }
     } finally {
+      bitmap?.close(); // 被丟棄的匯入
       state.importCount++;
       els.file.value = '';
     }
@@ -207,20 +221,31 @@ export function mountDarkroom(root, { debug = false } = {}) {
 
   async function onSave() {
     if (state.pendingShare) {
+      // 手勢過期或取消後再按：直接分享同一個檔案（此時有新的使用者手勢），不重做處理
+      if (state.busy) return;
       const file = state.pendingShare;
-      state.pendingShare = null;
+      state.busy = true; // 分享面板開著：按鈕忙碌，避免重複觸發
       render();
-      await shareNow(file);
+      try {
+        const how = await shareNow(file);
+        if (how !== 'cancelled' && how !== 'needsTap' && state.pendingShare === file) state.pendingShare = null;
+      } finally {
+        state.busy = false;
+        render();
+      }
       return;
     }
     if (!state.src || state.busy) return;
     state.busy = true;
     render();
     try {
-      const r = await exportImage(state.src, state.recipe, { privacy: state.privacy, lookId: state.recipe.base });
+      const src = state.src;
+      state.exportCount++;
+      const r = await exportImage(src, state.recipe, { privacy: state.privacy, lookId: state.recipe.base, maxPixels: state.maxPixels });
       state.lastExport = { name: r.file.name, hdr: r.hdr, notice: r.notice, timings: r.timings };
       const how = await deliver(r.file);
-      if (how === 'needsTap') state.pendingShare = r.file; // 使用者手勢過期：改顯示一顆按鈕再按一次
+      // 手勢過期（needsTap）或取消：留著檔案，改顯示「點這裡分享／儲存」；換了照片就不留
+      if ((how === 'needsTap' || how === 'cancelled') && state.src === src) state.pendingShare = r.file;
       if (r.notice === 'heicNoHdr') {
         if (lsGet(HEIC_HINT) !== '1') { lsSet(HEIC_HINT, '1'); showToast(t('notice.heicNoHdr'), { ms: 8000 }); }
       } else if (r.notice) {
@@ -251,9 +276,9 @@ export function mountDarkroom(root, { debug = false } = {}) {
   els.lang.addEventListener('change', () => setLang(els.lang.value));
   for (const l of LANGS) els.lang.add(new Option(LANG_NAMES[l], l));
 
-  // 按住預覽看原圖（spec §7.1）
+  // 按住預覽看原圖（spec §7.1）。掛在容器上：畫布可能被換掉（canvas-kind.js）
   let holdTimer = null;
-  els.canvas.addEventListener('pointerdown', () => {
+  els.preview.addEventListener('pointerdown', () => {
     if (!state.bitmap) return;
     holdTimer = setTimeout(() => { state.showOriginal = true; schedulePreview(); }, HOLD_MS);
   });
@@ -261,8 +286,10 @@ export function mountDarkroom(root, { debug = false } = {}) {
     clearTimeout(holdTimer);
     if (state.showOriginal) { state.showOriginal = false; schedulePreview(); }
   };
-  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) els.canvas.addEventListener(ev, release);
-  els.canvas.addEventListener('contextmenu', e => e.preventDefault());
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) els.preview.addEventListener(ev, release);
+  els.preview.addEventListener('contextmenu', e => e.preventDefault());
+  // 裝置畫布上限（spec §10）：稍後在背景量一次，避免和第一次匯入搶記憶體
+  setTimeout(() => getDeviceProfile().then(p => { state.maxPixels = p.maxCanvasPixels; }).catch(() => {}), 1500);
 
   const debugPanel = debug ? mountDebugPanel(root.querySelector('.toolbar'), root, async () => ({
     device: await (await import('../device.js')).getDeviceProfile(),
@@ -291,7 +318,12 @@ export function mountDarkroom(root, { debug = false } = {}) {
     $('#import-label').textContent = t('import.button');
     els.file.setAttribute('aria-label', t('import.button'));
     renderLookStrip(els.looks, { selected: state.recipe.base, onPick: pickLook });
-    renderPrivacy(els.privacy, state.privacy, p => { state.privacy = p; savePrivacy(p); render(); });
+    renderPrivacy(els.privacy, state.privacy, p => {
+      state.privacy = p;
+      state.pendingShare = null; // 待分享的檔案是用舊的隱私設定產生的，作廢（否則會送出剛選擇去除的 GPS）
+      savePrivacy(p);
+      render();
+    });
     if (state.recommendations) {
       recCanvases = renderRecommendRow(els.recommend, state.recommendations, { selected: state.recipe.base, onPick: pickLook });
       scheduleRecs();

@@ -1,7 +1,8 @@
 // Service Worker：App 檔案離線可用（spec §12）。ES module 不能 importScripts，版本字串寫死，
-// 由 test/unit/sw-precache.test.mjs 確認與 js/version.js 相同、且 PRECACHE 涵蓋所有 App 檔案。
+// 由 test/unit/sw-precache.test.mjs 確認與 js/version.js 相同、PRECACHE 涵蓋所有 App 檔案、BUILD 是最新的。
 const VERSION = '0.1.0';
-const CACHE = 'aio-cam-' + VERSION;
+const BUILD = '8f71e74cf5e0b925';            // 由 tools/stamp-sw.mjs 寫入：預先快取檔案的內容雜湊
+const CACHE = 'aio-cam-' + VERSION + '-' + BUILD;
 const PRECACHE = [
   "./css/app.css",
   "./icons/icon-180.png",
@@ -43,6 +44,7 @@ const PRECACHE = [
   "./js/looks/recommend.js",
   "./js/looks/sun.js",
   "./js/main.js",
+  "./js/ui/canvas-kind.js",
   "./js/ui/darkroom-view.js",
   "./js/ui/debug-panel.js",
   "./js/ui/look-strip.js",
@@ -54,7 +56,8 @@ const PRECACHE = [
 ];
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(PRECACHE)));
+  // cache: 'reload'：繞過 HTTP 快取（GitHub Pages 的 max-age=600），部署後第一次安裝才不會收進舊檔
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(PRECACHE.map(u => new Request(u, { cache: 'reload' })))));
 });
 
 self.addEventListener('activate', event => {

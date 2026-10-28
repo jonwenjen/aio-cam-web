@@ -1,0 +1,37 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>canvas</title>
+<script type="module">
+  // GPU 遺失後改用 WebGL2／CPU 時，已經有 'webgpu' context 的預覽畫布不能再拿 '2d'：要換一張新畫布
+  import { run, toImageData } from './harness.js';
+  import { makeSynthetic } from './synthetic.js';
+  import { toRenderParams } from '../../js/engine/params.js';
+  import { BUILTIN } from '../../js/looks/builtin.js';
+  import { createWebGPUEngine } from '../../js/engine/webgpu.js';
+  import { createWebGL2Engine } from '../../js/engine/webgl2.js';
+  import { CpuEngine } from '../../js/engine/cpu-ref.js';
+  import { canvasFor } from '../../js/ui/canvas-kind.js';
+  run(async () => {
+    if (!navigator.gpu) return { skipped: 'no webgpu' };
+    const img = toImageData(makeSynthetic('hueWheel', 64, 48));
+    const params = toRenderParams(BUILTIN.hiyori.recipe, { shortSide: 48 });
+    const holder = document.createElement('div');
+    const c = document.createElement('canvas');
+    c.id = 'p'; c.setAttribute('aria-label', 'preview');
+    holder.append(c); document.body.append(holder);
+    const gpu = await createWebGPUEngine();
+    const c1 = canvasFor(c, gpu.kind);
+    await gpu.renderToCanvas(img, params, c1);
+    const gl = await createWebGL2Engine();
+    const c2 = canvasFor(c1, gl.kind);
+    await gl.renderToCanvas(img, params, c2);
+    const c3 = canvasFor(c2, 'cpu');
+    await new CpuEngine().renderToCanvas(img, params, c3);
+    const failures = [];
+    if (c2 === c1) failures.push('canvas was not replaced after the engine kind changed');
+    if (c3 !== c2) failures.push('webgl2 → cpu (both 2d) should keep the canvas');
+    if (holder.firstChild !== c3 || c3.id !== 'p' || c3.getAttribute('aria-label') !== 'preview') failures.push('replacement keeps place, id and aria-label');
+    gpu.dispose(); gl.dispose();
+    return { pass: failures.length === 0, failures };
+  });
+</script>
